@@ -91,6 +91,11 @@ import click
 @click.option('--subsetseed', type=int, default=0, help='subset random seed (0 for time based)')
 @click.option('--device', type=int, default=0, help='Device')
 @click.option('--num_threads', type=int, default=2, help='Number of worker threads')
+# My added options
+@click.option('--use_other_source', is_flag=True, default=False, help='Use class "other" in visda2018 source dataset')
+@click.option('--use_other_target', is_flag=True, default=False, help='Use class "other" in visda2018 target dataset')
+@click.option('--visda2018', is_flag=True, default=False, help='Use visda2018 dataset instead of 2017')
+@click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
                learning_rate, pretrained_lr_factor, fix_layers,
@@ -107,7 +112,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                num_epochs, batch_size, epoch_size, seed,
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
-               device, num_threads):
+               device, num_threads,
+               use_other_source, use_other_target, visda2018, n_train_batches):
     settings = locals().copy()
 
     if rnd_init:
@@ -193,8 +199,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
         img_padding = (img_pad_width, img_pad_width)
 
         if exp == 'visda_train_val':
-            d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True)
-            d_target = visda17_dataset.ValidationDataset(img_size=img_shape, range01=True, rgb_order=True)
+            d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_source)
+            d_target = visda17_dataset.ValidationDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_target)
         elif exp == 'visda_train_test':
             d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True)
             d_target = visda17_dataset.TestDataset(img_size=img_shape, range01=True, rgb_order=True)
@@ -253,7 +259,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             g_tgt_pred = None
 
 
-        n_classes = d_source.n_classes
+        n_classes = max(d_source.n_classes, d_target.n_classes)
 
         print('Loaded data')
 
@@ -494,7 +500,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             n_samples = n_tgt
         else:
             n_samples = epoch_size
-        n_train_batches = n_samples // batch_size
+        if n_train_batches is None:
+            n_train_batches = n_samples // batch_size
         n_test_batches = n_tgt // (batch_size * 2) + 1
 
         print('Training...')
@@ -540,7 +547,6 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             # train_clf_loss, train_unsup_loss, mask_rate = train_ds.batch_map_mean(
             #     f_train, batch_size=batch_size, shuffle=shuffle_rng, n_batches=n_train_batches,
             #     progress_iter_func=progress_bar)
-
 
             if mask_rate > best_mask_rate:
                 best_mask_rate = mask_rate

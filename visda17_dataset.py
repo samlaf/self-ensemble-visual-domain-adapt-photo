@@ -7,13 +7,15 @@ from image_dataset import ImageDataset
 
 class VISDA17Dataset(ImageDataset):
     def __init__(self, img_size, range01, rgb_order,
-                 file_list_path, images_dir, has_ground_truth, dummy=False):
+                 file_list_path, images_dir, has_ground_truth, dummy=False, use_other=False):
 
         names = []
         paths = []
         y = None
         class_names = None
         n_classes = 12
+        if use_other:
+            n_classes += 1
         if has_ground_truth:
             y = []
             with open(file_list_path, 'r') as f:
@@ -21,6 +23,8 @@ class VISDA17Dataset(ImageDataset):
                 for line in lines:
                     if line.strip() != '':
                         name, _, cls_i = line.rpartition(' ')
+                        if not use_other and os.path.dirname(name) == 'other':
+                            continue
                         cls_i = int(cls_i)
                         names.append(name)
                         paths.append(os.path.join(images_dir, name))
@@ -79,12 +83,15 @@ class TrainDataset (VISDA17Dataset):
                 ))
 
 
-    def __init__(self, img_size, range01=False, rgb_order=False, dummy=False):
-        train_dir = settings.get_data_dir('visda17_clf_train')
+    def __init__(self, img_size, range01=False, rgb_order=False, dummy=False, visda2018=False, use_other=False):
+        if visda2018:
+            train_dir = settings.get_data_dir('visda18_clf_train')
+        else:
+            train_dir = settings.get_data_dir('visda17_clf_train')
         file_list_path = os.path.join(train_dir, 'image_list.txt')
         super(TrainDataset, self).__init__(img_size, range01, rgb_order,
                                            file_list_path, train_dir, has_ground_truth=True,
-                                           dummy=dummy)
+                                           dummy=dummy, use_other=use_other)
 
         self.object_ids = []
         self.cam_yaw = []
@@ -98,40 +105,43 @@ class TrainDataset (VISDA17Dataset):
         for sample_idx, name in enumerate(self.names):
             fn, _ = os.path.splitext(name)
             object_id, _, tail = fn.partition('__')
-            c_yaw, l_yaw, c_pitch = tail.split('_')
-            c_yaw = float(c_yaw)
-            l_yaw = float(l_yaw)
-            c_pitch = float(c_pitch)
+            # c_yaw, l_yaw, c_pitch = tail.split('_')
+            # c_yaw = float(c_yaw)
+            # l_yaw = float(l_yaw)
+            # c_pitch = float(c_pitch)
             obj_id_idx = self.obj_id_to_idx.setdefault(object_id, len(self.obj_id_to_idx))
-            c_yaw_idx = self.cam_yaw_to_idx.setdefault(c_yaw, len(self.cam_yaw_to_idx))
-            l_yaw_idx = self.light_yaw_to_idx.setdefault(l_yaw, len(self.light_yaw_to_idx))
-            c_pitch_idx = self.cam_pitch_to_idx.setdefault(c_pitch, len(self.cam_pitch_to_idx))
+            # c_yaw_idx = self.cam_yaw_to_idx.setdefault(c_yaw, len(self.cam_yaw_to_idx))
+            # l_yaw_idx = self.light_yaw_to_idx.setdefault(l_yaw, len(self.light_yaw_to_idx))
+            # c_pitch_idx = self.cam_pitch_to_idx.setdefault(c_pitch, len(self.cam_pitch_to_idx))
             self.object_ids.append(obj_id_idx)
-            self.cam_yaw.append(c_yaw_idx)
-            self.light_yaw.append(l_yaw_idx)
-            self.cam_pitch.append(c_pitch_idx)
+            # self.cam_yaw.append(c_yaw_idx)
+            # self.light_yaw.append(l_yaw_idx)
+            # self.cam_pitch.append(c_pitch_idx)
         self.object_ids = np.array(self.object_ids, dtype=np.int32)
-        self.cam_yaw = np.array(self.cam_yaw, dtype=np.int32)
-        self.light_yaw = np.array(self.light_yaw, dtype=np.int32)
-        self.cam_pitch = np.array(self.cam_pitch, dtype=np.int32)
+        # self.cam_yaw = np.array(self.cam_yaw, dtype=np.int32)
+        # self.light_yaw = np.array(self.light_yaw, dtype=np.int32)
+        # self.cam_pitch = np.array(self.cam_pitch, dtype=np.int32)
 
         sample_ndxs = np.arange(len(self.object_ids))
         self.samples_by_obj_id = [sample_ndxs[self.object_ids == i] for i in range(len(self.obj_id_to_idx))]
-        self.samples_by_cam_yaw = [sample_ndxs[self.cam_yaw == i] for i in range(len(self.cam_yaw_to_idx))]
-        self.samples_by_light_yaw = [sample_ndxs[self.light_yaw == i] for i in range(len(self.light_yaw_to_idx))]
-        self.samples_by_cam_pitch = [sample_ndxs[self.cam_pitch == i] for i in range(len(self.cam_pitch_to_idx))]
+        # self.samples_by_cam_yaw = [sample_ndxs[self.cam_yaw == i] for i in range(len(self.cam_yaw_to_idx))]
+        # self.samples_by_light_yaw = [sample_ndxs[self.light_yaw == i] for i in range(len(self.light_yaw_to_idx))]
+        # self.samples_by_cam_pitch = [sample_ndxs[self.cam_pitch == i] for i in range(len(self.cam_pitch_to_idx))]
 
         self.obj_X = self.ObjectImageAccessor(self)
 
 
 
 class ValidationDataset (VISDA17Dataset):
-    def __init__(self, img_size, range01=False, rgb_order=False, dummy=False):
-        val_dir = settings.get_data_dir('visda17_clf_validation')
+    def __init__(self, img_size, range01=False, rgb_order=False, dummy=False, visda2018=False, use_other=False):
+        if visda2018:
+            val_dir = settings.get_data_dir('visda18_clf_validation')
+        else:
+            val_dir = settings.get_data_dir('visda17_clf_validation')
         file_list_path = os.path.join(val_dir, 'image_list.txt')
         super(ValidationDataset, self).__init__(img_size, range01, rgb_order,
                                                 file_list_path, val_dir, has_ground_truth=True,
-                                                dummy=dummy)
+                                                dummy=dummy, use_other=use_other)
 
 
 
