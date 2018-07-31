@@ -23,9 +23,11 @@ class VISDA17Dataset(ImageDataset):
                 for line in lines:
                     if line.strip() != '':
                         name, _, cls_i = line.rpartition(' ')
-                        if not use_other and os.path.dirname(name) == 'other':
-                            continue
                         cls_i = int(cls_i)
+                        if use_other is False and cls_i == 12:
+                            break
+                        # use_other is just the count (how many other
+                        # images we want)
                         names.append(name)
                         paths.append(os.path.join(images_dir, name))
                         y.append(cls_i)
