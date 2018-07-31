@@ -93,7 +93,7 @@ import click
 @click.option('--num_threads', type=int, default=2, help='Number of worker threads')
 # My added options
 @click.option('--use_other_source', is_flag=True, default=False, help='Use class "other" in visda2018 source dataset')
-@click.option('--use_other_target', is_flag=True, default=False, help='Use class "other" in visda2018 target dataset')
+@click.option('--use_other_target', type=int, default=0, help='Number of images from class "other" visda2018 target dataset to use (0: None, -1: all)')
 @click.option('--visda2018', is_flag=True, default=False, help='Use visda2018 dataset instead of 2017')
 @click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
