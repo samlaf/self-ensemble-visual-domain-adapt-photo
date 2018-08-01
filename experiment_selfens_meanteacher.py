@@ -74,7 +74,7 @@ import click
               help='random cropping; constrain crop pairs to be within this distance (-1 = off)')
 @click.option('--img_pad_width', type=int, default=0,
               help='random cropping; padding width')
-@click.option('--num_epochs', type=int, default=200, help='number of epochs')
+@click.option('--num_epochs', type=int, default=200, help='number of epochs. If 0, then test only (don"t train)')
 @click.option('--batch_size', type=int, default=64, help='mini-batch size')
 @click.option('--epoch_size', type=str, default='target',
               help='# of samples in epoch; either a number or \'source\' or \'target\'')
@@ -140,7 +140,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
     elif log_file == 'none':
         log_file = None
 
-    if log_file is not None:
+    # If we aren't in testing mode
+    if log_file is not None and num_epochs != 0:
         if os.path.exists(log_file):
             print('Output log file {} already exists'.format(log_file))
             return
@@ -561,13 +562,14 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             if not skip_epoch_eval:
                 tgt_pred_prob_y, = data_source.batch_map_concat(f_pred_tgt, test_batch_iter,
                                                                 progress_iter_func=progress_bar)
-                mean_class_acc, cls_acc_str = evaluator.evaluate(tgt_pred_prob_y)
+                mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y)
                 t2 = time.time()
 
                 log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}; '
                     'TGT mean class acc={:.3%}'.format(
                     improve_str, epoch, t2 - t1, train_clf_loss, train_unsup_loss, mask_rate, mean_class_acc))
                 log('  per class:  {}'.format(cls_acc_str))
+                log(str(conf_matrix))
 
                 # Save results
                 if arr_tgt_pred_history is not None:
@@ -577,12 +579,18 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                 log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}'.format(
                     improve_str, epoch, t2 - t1, train_clf_loss, train_unsup_loss, mask_rate))
 
-
+            # Save network
+            if model_file != '':
+                cmdline_helpers.ensure_containing_dir_exists(model_file)
+                with open(model_file, 'wb') as f:
+                    pickle.dump(best_teacher_model_state, f)
+                    
         # Save network
-        if model_file != '':
+        if num_epochs == 0 and model_file != '':
+            # num_epochs == 0 means we are in testing mode, so load model
             cmdline_helpers.ensure_containing_dir_exists(model_file)
-            with open(model_file, 'wb') as f:
-                pickle.dump(best_teacher_model_state, f)
+            with open(model_file, 'rb') as f:
+                best_teacher_model_state = pickle.load(f)
 
         # Restore network to best state
         teacher_net.load_state_dict({k: torch.from_numpy(v) for k, v in best_teacher_model_state.items()})
@@ -592,19 +600,21 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                                                            progress_iter_func=progress_bar)
 
         if d_target.has_ground_truth:
-            mean_class_acc, cls_acc_str = evaluator.evaluate(tgt_pred_prob_y)
+            mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y)
 
             log('FINAL: TGT mean class acc={:.3%}'.format(mean_class_acc))
             log('  per class:  {}'.format(cls_acc_str))
+            log(str(conf_matrix))
 
         # Predict on test set, using augmentation
         tgt_aug_pred_prob_y, = target_mult_test_ds.batch_map_concat(f_pred_tgt_mult, batch_size=batch_size,
                                                                     progress_iter_func=progress_bar)
         if d_target.has_ground_truth:
-            aug_mean_class_acc, aug_cls_acc_str = evaluator.evaluate(tgt_aug_pred_prob_y)
+            aug_mean_class_acc, aug_cls_acc_str, conf_matrix = evaluator.evaluate(tgt_aug_pred_prob_y)
 
             log('FINAL: TGT AUG mean class acc={:.3%}'.format(aug_mean_class_acc))
             log('  per class:  {}'.format(aug_cls_acc_str))
+            log(str(conf_matrix))
 
         if f_target_pred is not None:
             f_target_pred.create_array(g_tgt_pred, 'y_prob', tgt_pred_prob_y)

@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 from sklearn.model_selection import StratifiedShuffleSplit, ShuffleSplit
-
+from sklearn.metrics import confusion_matrix
 
 class ImageDataset (object):
     class ImageAccessor (object):
@@ -95,7 +95,9 @@ class PredictionEvaluator (object):
         aug_cls_acc_str = ',  '.join(['{}: {:.3%}'.format(self.class_names[cls_i], aug_cls_acc[cls_i])
                                       for cls_i in range(self.n_classes)])
 
-        return mean_aug_class_acc, aug_cls_acc_str
+        conf_matrix = confusion_matrix(self.y, tgt_pred_y)
+
+        return mean_aug_class_acc, aug_cls_acc_str, conf_matrix
 
 
 def subset_indices(d_source, d_target, subsetsize, subsetseed):
