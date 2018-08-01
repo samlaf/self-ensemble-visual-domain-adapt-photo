@@ -13,9 +13,9 @@ class VISDA17Dataset(ImageDataset):
         paths = []
         y = None
         class_names = None
-        n_classes = 12
-        if use_other:
-            n_classes += 1
+        n_classes = 2
+        # if use_other:
+        #     n_classes += 1
         if has_ground_truth:
             y = []
             with open(file_list_path, 'r') as f:
@@ -30,12 +30,19 @@ class VISDA17Dataset(ImageDataset):
                             use_other -= 1
                         names.append(name)
                         paths.append(os.path.join(images_dir, name))
-                        y.append(cls_i)
-            class_names = [''] * n_classes
+                        # We set all known classes to 0 and unknown
+                        # images to 1
+                        if cls_i == 12:
+                            y.append(1)
+                        else:
+                            y.append(0)
+                        #y.append(cls_i)
+            #class_names = [''] * n_classes
+            class_names = ["known", "unknown"]
             y = np.array(y, dtype=np.int32)
-            for cls_i in range(n_classes):
-                first = np.arange(y.shape[0])[y == cls_i][0]
-                class_names[cls_i] = names[int(first)].partition('/')[0]
+            # for cls_i in range(n_classes):
+            #     first = np.arange(y.shape[0])[y == cls_i][0]
+            #     class_names[cls_i] = names[int(first)].partition('/')[0]
         else:
             y = None
             with open(file_list_path, 'r') as f:
