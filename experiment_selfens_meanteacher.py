@@ -260,7 +260,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             g_tgt_pred = None
 
 
-        n_classes = max(d_source.n_classes, d_target.n_classes)
+        n_classes = min(d_source.n_classes, d_target.n_classes)
 
         print('Loaded data')
 
