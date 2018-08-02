@@ -79,17 +79,18 @@ class PredictionEvaluator (object):
         self.class_names = class_names
         self.hist = np.bincount(y, minlength=self.n_classes)
 
-    def threshold_binary(self, x, t=0.3):
+    def threshold_binary(self, x, t=0.5):
         # We use this instead of argmax
         # basically says that we assign unknown whenever prediction
         # for unknown class is > threshold (0.3)
-        if x[-1] > t:
+        other_idx = list(self.class_names).index('other')
+        if x[other_idx] > t:
             return 1
         return 0
 
-    def evaluate(self, tgt_pred_prob_y):
-        tgt_pred_y = np.argmax(tgt_pred_prob_y, axis=1)
-        # tgt_pred_y = np.apply_along_axis(self.threshold_binary, 1, tgt_pred_prob_y)
+    def evaluate(self, tgt_pred_prob_y, t=0.5):
+        #tgt_pred_y = np.argmax(tgt_pred_prob_y, axis=1)
+        tgt_pred_y = np.apply_along_axis(lambda x: self.threshold_binary(x, t=t), 1, tgt_pred_prob_y)
         aug_class_true_pos = np.zeros((self.n_classes,))
 
         # Compute per-class accuracy

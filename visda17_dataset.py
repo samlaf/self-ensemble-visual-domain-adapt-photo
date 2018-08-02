@@ -38,7 +38,7 @@ class VISDA17Dataset(ImageDataset):
                             y.append(0)
                         #y.append(cls_i)
             #class_names = [''] * n_classes
-            class_names = ["known", "unknown"]
+            class_names = ["known", "other"]
             y = np.array(y, dtype=np.int32)
             # for cls_i in range(n_classes):
             #     first = np.arange(y.shape[0])[y == cls_i][0]
