@@ -96,6 +96,8 @@ import click
 @click.option('--use_other_target', type=int, default=0, help='Number of images from class "other" visda2018 target dataset to use (0: None, -1: all)')
 @click.option('--visda2018', is_flag=True, default=False, help='Use visda2018 dataset instead of 2017')
 @click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
+@click.option('--use_other_mask', is_flag=True, default=False, help='If true, filter out unknown predictions from consistency loss in target examples')
+
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
                learning_rate, pretrained_lr_factor, fix_layers,
@@ -113,7 +115,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask):
     settings = locals().copy()
 
     if rnd_init:
@@ -386,6 +388,10 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             aug_loss = d_aug_loss * d_aug_loss
 
             aug_loss = torch.mean(aug_loss, 1) * conf_mask
+            if use_other_mask:
+                argmax_tea = tea_out.argmax(dim=1)
+                unknown_mask = (argmax_tea != 12).float()
+                aug_loss = aug_loss * unknown_mask
 
             # Class balance loss
             if cls_balance > 0.0:
