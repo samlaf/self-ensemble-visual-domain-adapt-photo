@@ -96,6 +96,7 @@ import click
 @click.option('--use_other_target', type=int, default=0, help='Number of images from class "other" visda2018 target dataset to use (0: None, -1: all)')
 @click.option('--visda2018', is_flag=True, default=False, help='Use visda2018 dataset instead of 2017')
 @click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
+@click.option('--n_per_class', type=int, default=-1, help='Number of images to take from each class during training (-1: all)')
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
                learning_rate, pretrained_lr_factor, fix_layers,
@@ -113,7 +114,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches):
+               use_other_source, use_other_target, visda2018, n_train_batches, n_per_class):
     settings = locals().copy()
 
     if rnd_init:
@@ -201,7 +202,11 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
         if exp == 'visda_train_val':
             d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_source)
-            d_target = visda17_dataset.ValidationDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_target)
+            # We train with a small fraction of target dataset
+            # (n_per_class) and test on all dataset
+            d_target = visda17_dataset.ValidationDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_target,
+                                                         n_per_class=n_per_class)
+            d_target_test = visda17_dataset.ValidationDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=-1)
         elif exp == 'visda_train_test':
             d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True)
             d_target = visda17_dataset.TestDataset(img_size=img_shape, range01=True, rgb_order=True)
@@ -511,12 +516,15 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
         train_ds = data_source.CompositeDataSource([sup_ds, tgt_train_ds]).map(augment)
         train_ds = pool.parallel_data_source(train_ds, batch_buffer_size=min(20, n_train_batches))
 
-        target_ds_for_test = data_source.ArrayDataSource([d_target.images], indices=target_indices)
+        target_ds_for_test = data_source.ArrayDataSource([d_target_test.images], indices=target_indices)
         target_test_ds = target_ds_for_test.map(test_xf)
         target_test_ds = pool.parallel_data_source(target_test_ds, batch_buffer_size=min(20, n_test_batches))
         target_mult_test_ds = target_ds_for_test.map(test_xf_aug_mult)
         target_mult_test_ds = pool.parallel_data_source(target_mult_test_ds, batch_buffer_size=min(20, n_test_batches))
 
+        tgt_train_ds_for_test = data_source.ArrayDataSource([d_target.images], indices=target_indices)
+        target_train_ds = tgt_train_ds_for_test.map(test_xf)
+        target_train_ds = pool.parallel_data_source(target_train_ds, batch_buffer_size=min(20, n_test_batches))
 
         if seed != 0:
             shuffle_rng = np.random.RandomState(seed)
@@ -524,15 +532,22 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             shuffle_rng = np.random
 
         if d_target.has_ground_truth:
-            evaluator = d_target.prediction_evaluator(target_indices)
+            evaluator_train = d_target.prediction_evaluator(target_indices)
         else:
-            evaluator = None
+            evaluator_train = None
+        if d_target_test.has_ground_truth:
+            evaluator_test = d_target_test.prediction_evaluator(target_indices)
+        else:
+            evaluator_test = None
+        
 
 
         best_mask_rate = 0.0
         best_teacher_model_state = {k: v.cpu().numpy() for k, v in teacher_net.state_dict().items()}
 
         train_batch_iter = train_ds.batch_iterator(batch_size=batch_size, shuffle=shuffle_rng)
+
+        ###### --------------------------------------------------
 
         for epoch in range(num_epochs):
             t1 = time.time()
@@ -562,15 +577,29 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             if not skip_epoch_eval:
                 tgt_pred_prob_y, = data_source.batch_map_concat(f_pred_tgt, test_batch_iter,
                                                                 progress_iter_func=progress_bar)
-                mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y)
+                mean_class_acc, cls_acc_str, conf_matrix = evaluator_test.evaluate(tgt_pred_prob_y)
                 t2 = time.time()
 
                 log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}; '
                     'TGT mean class acc={:.3%}'.format(
                     improve_str, epoch, t2 - t1, train_clf_loss, train_unsup_loss, mask_rate, mean_class_acc))
                 log('  per class:  {}'.format(cls_acc_str))
-                log(str(conf_matrix))
+                #log(str(conf_matrix))
 
+                # -------------------------------------------------- #
+                # We also predict on the small target training set
+                tgt_pred_prob_y, = target_train_ds.batch_map_concat(f_pred_tgt, batch_size=batch_size,
+                                                           progress_iter_func=progress_bar)
+
+                if d_target.has_ground_truth:
+                    mean_class_acc, cls_acc_str, conf_matrix = evaluator_train.evaluate(tgt_pred_prob_y)
+
+                log('Training target mean class acc={:.3%}'.format(mean_class_acc))
+                log('  per class:  {}'.format(cls_acc_str))
+                log('\n')
+                #log(str(conf_matrix))
+                # -------------------------------------------------- #
+                
                 # Save results
                 if arr_tgt_pred_history is not None:
                     arr_tgt_pred_history.append(tgt_pred_prob_y[None, ...].astype(np.float32))
@@ -600,7 +629,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                                                            progress_iter_func=progress_bar)
 
         if d_target.has_ground_truth:
-            mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y)
+            mean_class_acc, cls_acc_str, conf_matrix = evaluator_test.evaluate(tgt_pred_prob_y)
 
             log('FINAL: TGT mean class acc={:.3%}'.format(mean_class_acc))
             log('  per class:  {}'.format(cls_acc_str))
@@ -610,7 +639,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
         tgt_aug_pred_prob_y, = target_mult_test_ds.batch_map_concat(f_pred_tgt_mult, batch_size=batch_size,
                                                                     progress_iter_func=progress_bar)
         if d_target.has_ground_truth:
-            aug_mean_class_acc, aug_cls_acc_str, conf_matrix = evaluator.evaluate(tgt_aug_pred_prob_y)
+            aug_mean_class_acc, aug_cls_acc_str, conf_matrix = evaluator_test.evaluate(tgt_aug_pred_prob_y)
 
             log('FINAL: TGT AUG mean class acc={:.3%}'.format(aug_mean_class_acc))
             log('  per class:  {}'.format(aug_cls_acc_str))

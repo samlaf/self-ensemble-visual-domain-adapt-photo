@@ -4,10 +4,25 @@ from sklearn.model_selection import StratifiedShuffleSplit, ShuffleSplit
 import settings
 from image_dataset import ImageDataset
 
+def filter_lines(lines, n=-1, other=-1, n_classes=13):
+    # n is # of examples to take from each class
+    # other is # of examples to take from class other
+    # -1 means take everything
+    counts = [0 for _ in range(n_classes)]
+    maxs = [n for _ in range(n_classes)]
+    maxs[-1] = other
+    filtered_lines = []
+    for name, cls_i in lines:
+        if counts[cls_i] == maxs[cls_i]:
+            continue
+        else:
+            filtered_lines.append([name, cls_i])
+            counts[cls_i] += 1
+    return filtered_lines
 
 class VISDA17Dataset(ImageDataset):
     def __init__(self, img_size, range01, rgb_order,
-                 file_list_path, images_dir, has_ground_truth, dummy=False, use_other=False):
+                 file_list_path, images_dir, has_ground_truth, dummy=False, use_other=0, n_per_class=-1):
 
         names = []
         paths = []
@@ -20,17 +35,13 @@ class VISDA17Dataset(ImageDataset):
             y = []
             with open(file_list_path, 'r') as f:
                 lines = f.readlines()
-                for line in lines:
-                    if line.strip() != '':
-                        name, _, cls_i = line.rpartition(' ')
-                        cls_i = int(cls_i)
-                        if use_other == 0 and cls_i == 12:
-                            break
-                        elif cls_i == 12:
-                            use_other -= 1
-                        names.append(name)
-                        paths.append(os.path.join(images_dir, name))
-                        y.append(cls_i)
+                lines = [line.split() for line in lines if line.strip() != '']
+                lines = [(name, int(cls_i)) for name, cls_i in lines]
+                lines = filter_lines(lines, n=n_per_class, other=use_other)
+                for name, cls_i in lines:
+                    names.append(name)
+                    paths.append(os.path.join(images_dir, name))
+                    y.append(cls_i)
             class_names = [''] * n_classes
             y = np.array(y, dtype=np.int32)
             for cls_i in range(n_classes):
@@ -135,7 +146,7 @@ class TrainDataset (VISDA17Dataset):
 
 
 class ValidationDataset (VISDA17Dataset):
-    def __init__(self, img_size, range01=False, rgb_order=False, dummy=False, visda2018=False, use_other=False):
+    def __init__(self, img_size, range01=False, rgb_order=False, dummy=False, visda2018=False, use_other=False, n_per_class=-1):
         if visda2018:
             val_dir = settings.get_data_dir('visda18_clf_validation')
         else:
@@ -143,7 +154,7 @@ class ValidationDataset (VISDA17Dataset):
         file_list_path = os.path.join(val_dir, 'image_list.txt')
         super(ValidationDataset, self).__init__(img_size, range01, rgb_order,
                                                 file_list_path, val_dir, has_ground_truth=True,
-                                                dummy=dummy, use_other=use_other)
+                                                dummy=dummy, use_other=use_other, n_per_class=n_per_class)
 
 
 
