@@ -254,6 +254,9 @@ def bugged_cls_bal_bce(pred, tgt):
 def log_cls_bal(pred, tgt):
     return -torch.log(pred + 1.0e-6)
 
+def bce_vector_cls_bal(pred, tgt):
+    return - tgt * torch.log(pred)
+
 def get_cls_bal_function(name):
     if name == 'bce':
         return robust_binary_crossentropy
@@ -261,3 +264,5 @@ def get_cls_bal_function(name):
         return log_cls_bal
     elif name == 'bug':
         return bugged_cls_bal_bce
+    elif name in ['uniform_known', '8x', '1/20+8/20']:
+        return bce_vector_cls_bal
