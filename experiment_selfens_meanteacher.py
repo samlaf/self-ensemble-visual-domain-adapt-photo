@@ -97,6 +97,7 @@ import click
 @click.option('--visda2018', is_flag=True, default=False, help='Use visda2018 dataset instead of 2017')
 @click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
 @click.option('--use_other_mask', is_flag=True, default=False, help='If true, filter out unknown predictions from consistency loss in target examples')
+@click.option('--threshold_pred', type=float, help='If unknown predictions is above threshold, predict unknown, even if not argmax')
 
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
@@ -115,7 +116,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred):
     settings = locals().copy()
 
     if rnd_init:
@@ -568,7 +569,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             if not skip_epoch_eval:
                 tgt_pred_prob_y, = data_source.batch_map_concat(f_pred_tgt, test_batch_iter,
                                                                 progress_iter_func=progress_bar)
-                mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y)
+                mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y, t=threshold_pred)
                 t2 = time.time()
 
                 log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}; '
@@ -606,7 +607,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                                                            progress_iter_func=progress_bar)
 
         if d_target.has_ground_truth:
-            mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y)
+            mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y, t=threshold_pred)
 
             log('FINAL: TGT mean class acc={:.3%}'.format(mean_class_acc))
             log('  per class:  {}'.format(cls_acc_str))
@@ -616,7 +617,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
         tgt_aug_pred_prob_y, = target_mult_test_ds.batch_map_concat(f_pred_tgt_mult, batch_size=batch_size,
                                                                     progress_iter_func=progress_bar)
         if d_target.has_ground_truth:
-            aug_mean_class_acc, aug_cls_acc_str, conf_matrix = evaluator.evaluate(tgt_aug_pred_prob_y)
+            aug_mean_class_acc, aug_cls_acc_str, conf_matrix = evaluator.evaluate(tgt_aug_pred_prob_y, t=threshold_pred)
 
             log('FINAL: TGT AUG mean class acc={:.3%}'.format(aug_mean_class_acc))
             log('  per class:  {}'.format(aug_cls_acc_str))
