@@ -98,6 +98,8 @@ import click
 @click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
 @click.option('--use_other_mask', is_flag=True, default=False, help='If true, filter out unknown predictions from consistency loss in target examples')
 @click.option('--threshold_pred', type=float, help='If unknown predictions is above threshold, predict unknown, even if not argmax')
+@click.option('--ct_known', type=float, help='Confidence threshold to use on known examples')
+@click.option('--ct_unknown', type=float, help='Confidence threshold to use on unknown examples')
 
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
@@ -116,7 +118,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, ct_known, ct_unknown):
     settings = locals().copy()
 
     if rnd_init:
@@ -364,12 +366,12 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
 
         if constrain_crop >= 0:
-            def augment(X_sup, y_sup, X_tgt):
+            def augment(X_sup, y_sup, X_tgt, y_tgt):
                 X_sup = sup_xf(X_sup)[0]
                 X_unsup_both = unsup_xf(X_tgt)[0]
                 X_unsup_stu = X_unsup_both[:len(X_tgt)]
                 X_unsup_tea = X_unsup_both[len(X_tgt):]
-                return X_sup, y_sup, X_unsup_stu, X_unsup_tea
+                return X_sup, y_sup, X_unsup_stu, X_unsup_tea, torch.Tensor(y_tgt).cuda()
         else:
             def augment(X_sup, y_sup, X_tgt):
                 X_sup = sup_xf(X_sup)[0]
@@ -380,10 +382,18 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
         cls_bal_fn = network_architectures.get_cls_bal_function(cls_balance_loss)
 
-        def compute_aug_loss(stu_out, tea_out):
+        def compute_aug_loss(stu_out, tea_out, y_unsup):
             # Augmentation loss
-            conf_tea = torch.max(tea_out, 1)[0]
-            conf_mask = torch.gt(conf_tea, confidence_thresh).float()
+            conf_tea, pred_tea = torch.max(tea_out, 1)
+            # Now we are cheating by using y_unsup just to check if
+            # this idea makes sense. Eventually we should use pred_tea
+            # though
+            if ct_known:
+                known_mask = (torch.gt(conf_tea, ct_known) & (y_unsup != 12))
+                unknown_mask = (torch.gt(conf_tea, ct_unknown) & (y_unsup == 12))
+                conf_mask = (known_mask | unknown_mask).float()
+            else:
+                conf_mask = torch.gt(conf_tea, confidence_thresh).float()
 
             d_aug_loss = stu_out - tea_out
             aug_loss = d_aug_loss * d_aug_loss
@@ -398,6 +408,9 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             if cls_balance > 0.0:
                 # Average over samples to get average class prediction
                 avg_cls_prob = torch.mean(stu_out, 0)
+                # print(avg_cls_prob)
+                # print("% of masks applied:", conf_mask.mean().item())
+                # print("Correct known predictions:", ((y_unsup == tea_out.argmax(dim=1).float()) & (y_unsup != 12)).float().mean().item())
                 # Compute loss
                 equalise_cls_loss = cls_bal_fn(avg_cls_prob, float(1.0 / n_classes))
 
@@ -410,7 +423,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             return aug_loss, conf_mask, equalise_cls_loss
 
         _one = torch.autograd.Variable(torch.from_numpy(np.array([1.0]).astype(np.float32)).cuda())
-        def f_train(X_sup, y_sup, X_unsup0, X_unsup1):
+        def f_train(X_sup, y_sup, X_unsup0, X_unsup1, y_unsup):
             X_sup = torch.autograd.Variable(torch.from_numpy(X_sup).cuda())
             y_sup = torch.autograd.Variable(torch.from_numpy(y_sup).long().cuda())
             X_unsup0 = torch.autograd.Variable(torch.from_numpy(X_unsup0).cuda())
@@ -434,7 +447,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             else:
                 clf_loss = classification_criterion(sup_logits_out, y_sup)
 
-            aug_loss, conf_mask, cls_bal_loss = compute_aug_loss(student_unsup_prob_out, teacher_unsup_prob_out)
+            aug_loss, conf_mask, cls_bal_loss = compute_aug_loss(student_unsup_prob_out, teacher_unsup_prob_out, y_unsup)
 
             conf_mask_count = torch.sum(conf_mask)
 
@@ -514,7 +527,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
         print('Training...')
         sup_ds = data_source.ArrayDataSource([d_source.images, d_source.y], repeats=-1, indices=source_indices)
-        tgt_train_ds = data_source.ArrayDataSource([d_target.images], repeats=-1, indices=target_indices)
+        tgt_train_ds = data_source.ArrayDataSource([d_target.images, d_target.y], repeats=-1, indices=target_indices)
         train_ds = data_source.CompositeDataSource([sup_ds, tgt_train_ds]).map(augment)
         train_ds = pool.parallel_data_source(train_ds, batch_buffer_size=min(20, n_train_batches))
 
