@@ -89,8 +89,10 @@ class PredictionEvaluator (object):
         return 0
 
     def evaluate(self, tgt_pred_prob_y, t=0.5):
-        #tgt_pred_y = np.argmax(tgt_pred_prob_y, axis=1)
-        tgt_pred_y = np.apply_along_axis(lambda x: self.threshold_binary(x, t=t), 1, tgt_pred_prob_y)
+        if t is None:
+            tgt_pred_y = np.argmax(tgt_pred_prob_y, axis=1)
+        else:
+            tgt_pred_y = np.apply_along_axis(lambda x: self.threshold_binary(x, t=t), 1, tgt_pred_prob_y)
         aug_class_true_pos = np.zeros((self.n_classes,))
 
         # Compute per-class accuracy
