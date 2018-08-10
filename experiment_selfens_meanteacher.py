@@ -98,6 +98,7 @@ import click
 @click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
 @click.option('--use_other_mask', is_flag=True, default=False, help='If true, filter out unknown predictions from consistency loss in target examples')
 @click.option('--threshold_pred', type=float, help='If unknown predictions is above threshold, predict unknown, even if not argmax')
+@click.option('--stop_sup_epoch', type=int, help='We stop using the supervised loss and stop_sup_epoch')
 
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
@@ -116,7 +117,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, stop_sup_epoch):
     settings = locals().copy()
 
     if rnd_init:
@@ -458,6 +459,54 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                        mask_count]
             return tuple(outputs)
 
+        def f_train_no_sup(X_sup, y_sup, X_unsup0, X_unsup1):
+            X_sup = torch.autograd.Variable(torch.from_numpy(X_sup).cuda())
+            y_sup = torch.autograd.Variable(torch.from_numpy(y_sup).long().cuda())
+            X_unsup0 = torch.autograd.Variable(torch.from_numpy(X_unsup0).cuda())
+            X_unsup1 = torch.autograd.Variable(torch.from_numpy(X_unsup1).cuda())
+
+            if pretrained_student_optimizer is not None:
+                pretrained_student_optimizer.zero_grad()
+            new_student_optimizer.zero_grad()
+            student_net.train(mode=True)
+            teacher_net.train(mode=True)
+
+            sup_logits_out = student_net(X_sup)
+            student_unsup_logits_out = student_net(X_unsup0)
+            student_unsup_prob_out = F.softmax(student_unsup_logits_out)
+            teacher_unsup_logits_out = teacher_net(X_unsup1)
+            teacher_unsup_prob_out = F.softmax(teacher_unsup_logits_out)
+
+            # Supervised classification loss
+            if double_softmax:
+                clf_loss = classification_criterion(F.softmax(sup_logits_out), y_sup)
+            else:
+                clf_loss = classification_criterion(sup_logits_out, y_sup)
+
+            aug_loss, conf_mask, cls_bal_loss = compute_aug_loss(student_unsup_prob_out, teacher_unsup_prob_out)
+
+            conf_mask_count = torch.sum(conf_mask)
+
+            unsup_loss = torch.mean(aug_loss)
+            loss_expr = unsup_loss * unsup_weight
+            if cls_bal_loss is not None:
+                loss_expr = loss_expr + cls_bal_loss * cls_balance * unsup_weight
+
+            loss_expr.backward()
+            if pretrained_student_optimizer is not None:
+                pretrained_student_optimizer.step()
+            new_student_optimizer.step()
+            teacher_optimizer.step()
+
+            n_samples = X_sup.size()[0]
+
+            mask_count = conf_mask_count.data.cpu()[0]
+
+            outputs = [float(clf_loss.data.cpu()[0]) * n_samples,
+                       float(unsup_loss.data.cpu()[0]) * n_samples,
+                       mask_count]
+            return tuple(outputs)
+
         print('Compiled training function')
 
         def f_pred_src(X_sup):
@@ -549,8 +598,12 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             else:
                 test_batch_iter = None
 
-            train_clf_loss, train_unsup_loss, mask_rate = data_source.batch_map_mean(
-                f_train, train_batch_iter, progress_iter_func=progress_bar, n_batches=n_train_batches)
+            if epoch < stop_sup_epoch:
+                train_clf_loss, train_unsup_loss, mask_rate = data_source.batch_map_mean(
+                    f_train, train_batch_iter, progress_iter_func=progress_bar, n_batches=n_train_batches)
+            else:
+                train_clf_loss, train_unsup_loss, mask_rate = data_source.batch_map_mean(
+                    f_train_no_sup, train_batch_iter, progress_iter_func=progress_bar, n_batches=n_train_batches)
 
             # train_clf_loss, train_unsup_loss, mask_rate = train_ds.batch_map_mean(
             #     f_train, batch_size=batch_size, shuffle=shuffle_rng, n_batches=n_train_batches,
