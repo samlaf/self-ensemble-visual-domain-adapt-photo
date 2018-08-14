@@ -264,5 +264,5 @@ def get_cls_bal_function(name):
         return log_cls_bal
     elif name == 'bug':
         return bugged_cls_bal_bce
-    elif name in ['uniform_known', '8x', '1/20+8/20']:
+    elif name in ['uniform_known', '8x', '1/20+8/20', 'uniform_all', 'other_only']:
         return bce_vector_cls_bal
