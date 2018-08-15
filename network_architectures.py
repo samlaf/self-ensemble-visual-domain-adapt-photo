@@ -138,6 +138,30 @@ class ResNet(DomainAdaptModule):
 
         return nn.Sequential(*layers)
 
+    def embedding(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        x = self.new_fc5(x)
+        #x = self.relu(x)
+        return x
+
+    def classify(self, x):
+        x = self.relu(x)
+        if self.use_dropout:
+            x = self.new_drop_fc5(x)
+        x = self.new_fc6(x)
+        return x
+
     def forward(self, x):
         x = self.conv1(x)
         x = self.bn1(x)

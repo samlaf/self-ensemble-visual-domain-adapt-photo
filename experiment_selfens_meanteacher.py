@@ -98,6 +98,7 @@ import click
 @click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
 @click.option('--use_other_mask', is_flag=True, default=False, help='If true, filter out unknown predictions from consistency loss in target examples')
 @click.option('--threshold_pred', type=float, help='If unknown predictions is above threshold, predict unknown, even if not argmax')
+@click.option('--graph_loss_wt', type=float, help='Weight to give to graph smoothing loss')
 
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
@@ -116,7 +117,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt):
     settings = locals().copy()
 
     if rnd_init:
@@ -380,6 +381,25 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
         cls_bal_fn = network_architectures.get_cls_bal_function(cls_balance_loss)
 
+        def compute_graph_loss(embed, tea_out):
+            # Use the teacher to get matrix W
+            y_c = tea_out.argmax(dim=1).view(-1,1)
+            W_1 = (y_c == y_c.t()).float()
+            W_0 = 1 - W_1
+            if use_other_mask:
+                y_not_other = (y_c != 12).float()
+                mask_other = y_not_other * y_not_other.t()
+                W_0, W_1 = W_0 * mask_other, W_1 * mask_other
+
+            # Compute distance loss matrix
+            embed = embed.unsqueeze(0)
+            dists = embed - embed.t()
+            dists = dists ** 2
+            L_1 = dists.sum(dim=2)
+            L_0 = L_1.max(torch.zeros(L_1.shape).cuda())
+            Loss = L_0 * W_0 + L_1 * W_1
+            return Loss.mean()
+
         def compute_aug_loss(stu_out, tea_out):
             # Augmentation loss
             conf_tea = torch.max(tea_out, 1)[0]
@@ -431,10 +451,12 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             teacher_net.train(mode=True)
 
             sup_logits_out = student_net(X_sup)
-            student_unsup_logits_out = student_net(X_unsup0)
-            student_unsup_prob_out = F.softmax(student_unsup_logits_out)
+            student_unsup_embeddings = student_net.embedding(X_unsup0)
+            #student_unsup_logits_out = student_net(X_unsup0)
+            student_unsup_logits_out = student_net.classify(student_unsup_embeddings)
+            student_unsup_prob_out = F.softmax(student_unsup_logits_out, dim=1)
             teacher_unsup_logits_out = teacher_net(X_unsup1)
-            teacher_unsup_prob_out = F.softmax(teacher_unsup_logits_out)
+            teacher_unsup_prob_out = F.softmax(teacher_unsup_logits_out, dim=1)
 
             # Supervised classification loss
             if double_softmax:
@@ -443,6 +465,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                 clf_loss = classification_criterion(sup_logits_out, y_sup)
 
             aug_loss, conf_mask, cls_bal_loss = compute_aug_loss(student_unsup_prob_out, teacher_unsup_prob_out)
+            graph_loss = compute_graph_loss(student_unsup_embeddings, teacher_unsup_logits_out)
 
             conf_mask_count = torch.sum(conf_mask)
 
@@ -450,6 +473,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             loss_expr = clf_loss + unsup_loss * unsup_weight
             if cls_bal_loss is not None:
                 loss_expr = loss_expr + cls_bal_loss * cls_balance * unsup_weight
+            if graph_loss_wt is not None:
+                loss_expr += graph_loss * graph_loss_wt
 
             loss_expr.backward()
             if pretrained_student_optimizer is not None:
