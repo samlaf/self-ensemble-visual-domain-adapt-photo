@@ -488,7 +488,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
             outputs = [float(clf_loss.data.cpu()[0]) * n_samples,
                        float(unsup_loss.data.cpu()[0]) * n_samples,
-                       mask_count]
+                       mask_count,
+                       float(graph_loss.cpu().item())]
             return tuple(outputs)
 
         print('Compiled training function')
@@ -582,7 +583,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             else:
                 test_batch_iter = None
 
-            train_clf_loss, train_unsup_loss, mask_rate = data_source.batch_map_mean(
+            train_clf_loss, train_unsup_loss, mask_rate, graph_loss = data_source.batch_map_mean(
                 f_train, train_batch_iter, progress_iter_func=progress_bar, n_batches=n_train_batches)
 
             # train_clf_loss, train_unsup_loss, mask_rate = train_ds.batch_map_mean(
@@ -605,9 +606,9 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                 mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y, t=threshold_pred)
                 t2 = time.time()
 
-                log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}; '
+                log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}, graph_loss={:.3}; '
                     'TGT mean class acc={:.3%}'.format(
-                    improve_str, epoch, t2 - t1, train_clf_loss, train_unsup_loss, mask_rate, mean_class_acc))
+                        improve_str, epoch, t2 - t1, train_clf_loss, train_unsup_loss, mask_rate, graph_loss, mean_class_acc))
                 log('  per class:  {}'.format(cls_acc_str))
                 log(str(conf_matrix))
 
