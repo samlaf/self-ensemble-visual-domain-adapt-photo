@@ -99,6 +99,7 @@ import click
 @click.option('--use_other_mask', is_flag=True, default=False, help='If true, filter out unknown predictions from consistency loss in target examples')
 @click.option('--threshold_pred', type=float, help='If unknown predictions is above threshold, predict unknown, even if not argmax')
 @click.option('--graph_loss_wt', type=float, help='Weight to give to graph smoothing loss')
+@click.option('--use_bce', is_flag=True, default=False, help='Use element-wise sigmoid + BCE instead of softmax + CE')
 
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
@@ -117,7 +118,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt, use_bce):
     settings = locals().copy()
 
     if rnd_init:
@@ -437,6 +438,12 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
             return aug_loss, conf_mask, equalise_cls_loss
 
+        def get_one_hot(y, n_classes):
+            y_onehot = torch.zeros(y.size(0), n_classes).cuda()
+            y_onehot.scatter_(1, y.view(-1,1), 1)
+            return y_onehot
+            
+
         _one = torch.autograd.Variable(torch.from_numpy(np.array([1.0]).astype(np.float32)).cuda())
         def f_train(X_sup, y_sup, X_unsup0, X_unsup1):
             X_sup = torch.autograd.Variable(torch.from_numpy(X_sup).cuda())
@@ -459,10 +466,15 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             teacher_unsup_prob_out = F.softmax(teacher_unsup_logits_out, dim=1)
 
             # Supervised classification loss
-            if double_softmax:
-                clf_loss = classification_criterion(F.softmax(sup_logits_out), y_sup)
-            else:
+            if use_bce:
+                classification_criterion = nn.BCEWithLogitsLoss()
+                y_sup = get_one_hot(y_sup, n_classes)
                 clf_loss = classification_criterion(sup_logits_out, y_sup)
+            else:
+                if double_softmax:
+                    clf_loss = classification_criterion(F.softmax(sup_logits_out), y_sup)
+                else:
+                    clf_loss = classification_criterion(sup_logits_out, y_sup)
 
             aug_loss, conf_mask, cls_bal_loss = compute_aug_loss(student_unsup_prob_out, teacher_unsup_prob_out)
             graph_loss = compute_graph_loss(student_unsup_embeddings, teacher_unsup_logits_out)
