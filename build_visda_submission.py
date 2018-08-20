@@ -44,11 +44,12 @@ def build_submission(output, source_pred_path, predictions_paths, no_aug, epoch)
 
 
             for i in range(len(pred_y_cls)):
-                dest_file.write('{}\n'.format(pred_y_cls[i]).encode('us-ascii'))
+                #dest_file.write('{}\n'.format(pred_y_cls[i]).encode('us-ascii'))
+                dest_file.write('{}\n'.format(pred_y_cls[i]))
 
     z = zipfile.ZipFile(output, mode='w')
-    write_predictions(z.open('source_results.txt', 'w'), [source_pred_path])
-    write_predictions(z.open('adaptation_results.txt', 'w'), predictions_paths)
+    #write_predictions(open('source_results.txt', mode='w'), [source_pred_path])
+    write_predictions(open('adaptation_results.txt', 'w'), predictions_paths)
     z.close()
 
 

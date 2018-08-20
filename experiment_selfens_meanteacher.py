@@ -206,8 +206,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_source)
             d_target = visda17_dataset.ValidationDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_target)
         elif exp == 'visda_train_test':
-            d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True)
-            d_target = visda17_dataset.TestDataset(img_size=img_shape, range01=True, rgb_order=True)
+            d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_source)
+            d_target = visda17_dataset.TestDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_target)
 
             if not skip_epoch_eval:
                 print('WARNING: setting skip_epoch_eval to True')
@@ -569,6 +569,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             if not skip_epoch_eval:
                 tgt_pred_prob_y, = data_source.batch_map_concat(f_pred_tgt, test_batch_iter,
                                                                 progress_iter_func=progress_bar)
+
                 mean_class_acc, cls_acc_str, conf_matrix = evaluator.evaluate(tgt_pred_prob_y, t=threshold_pred)
                 t2 = time.time()
 
@@ -585,6 +586,12 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                 t2 = time.time()
                 log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}'.format(
                     improve_str, epoch, t2 - t1, train_clf_loss, train_unsup_loss, mask_rate))
+
+                # Testing writing to h5 during training
+                #tgt_pred_prob_y, = target_test_ds.batch_map_concat(f_pred_tgt, batch_size=batch_size, progress_iter_func=progress_bar)
+                #if f_target_pred is not None:
+                    #f_target_pred.create_array(g_tgt_pred, 'y_prob', tgt_pred_prob_y)
+                    #f_target_pred.close()
 
             # Save network
             if model_file != '':
@@ -603,7 +610,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
         teacher_net.load_state_dict({k: torch.from_numpy(v) for k, v in best_teacher_model_state.items()})
 
         # Predict on test set, without augmentation
-        tgt_pred_prob_y, = target_test_ds.batch_map_concat(f_pred_tgt, batch_size=batch_size,
+        tgt_pred_prob_y, = target_test_ds.batch_map_concat(f_pred_tgt, batch_size=1,
                                                            progress_iter_func=progress_bar)
 
         if d_target.has_ground_truth:
@@ -613,8 +620,11 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             log('  per class:  {}'.format(cls_acc_str))
             log(str(conf_matrix))
 
+        if f_target_pred is not None:
+            f_target_pred.create_array(g_tgt_pred, 'y_prob', tgt_pred_prob_y)
+
         # Predict on test set, using augmentation
-        tgt_aug_pred_prob_y, = target_mult_test_ds.batch_map_concat(f_pred_tgt_mult, batch_size=batch_size,
+        tgt_aug_pred_prob_y, = target_mult_test_ds.batch_map_concat(f_pred_tgt_mult, batch_size=1,
                                                                     progress_iter_func=progress_bar)
         if d_target.has_ground_truth:
             aug_mean_class_acc, aug_cls_acc_str, conf_matrix = evaluator.evaluate(tgt_aug_pred_prob_y, t=threshold_pred)
@@ -624,7 +634,6 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             log(str(conf_matrix))
 
         if f_target_pred is not None:
-            f_target_pred.create_array(g_tgt_pred, 'y_prob', tgt_pred_prob_y)
             f_target_pred.create_array(g_tgt_pred, 'y_prob_aug', tgt_aug_pred_prob_y)
             f_target_pred.close()
 
