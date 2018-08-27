@@ -84,9 +84,11 @@ class PredictionEvaluator (object):
         # basically says that we assign unknown whenever prediction
         # for unknown class is > threshold (0.3)
         other_idx = list(self.class_names).index('other')
-        if x[other_idx] > t:
-            return 1
-        return 0
+        max_val = x.max()
+        argmax_idx = x.argmax()
+        if max_val > t:
+            return argmax_idx
+        return other_idx
 
     def evaluate(self, tgt_pred_prob_y, t=0.2):
         if t is None:

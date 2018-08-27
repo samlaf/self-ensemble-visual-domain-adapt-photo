@@ -97,9 +97,11 @@ import click
 @click.option('--visda2018', is_flag=True, default=False, help='Use visda2018 dataset instead of 2017')
 @click.option('--n_train_batches', type=int, help='Number of batches to process during training. Mainly used for debugging (small n_train_batches)')
 @click.option('--use_other_mask', is_flag=True, default=False, help='If true, filter out unknown predictions from consistency loss in target examples')
-@click.option('--threshold_pred', type=float, help='If unknown predictions is above threshold, predict unknown, even if not argmax')
+@click.option('--threshold_pred', type=float, help='At test time, if max prediction is below threshold, predict unknown')
 @click.option('--graph_loss_wt', type=float, help='Weight to give to graph smoothing loss')
-@click.option('--use_bce', is_flag=True, default=False, help='Use element-wise sigmoid + BCE instead of softmax + CE')
+@click.option('--use_bce', type=bool, default=False, help='Use element-wise sigmoid + BCE instead of softmax + CE')
+@click.option('--dct_file', type=str, default='', help='File to save json dct with accuracies in')
+@click.option('--anneal', type=bool, default=False, help='Anneal confidence_thresh (*0.95 every epoch)')
 
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
@@ -118,7 +120,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt, use_bce):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt, use_bce, dct_file, anneal):
     settings = locals().copy()
 
     if rnd_init:
@@ -137,6 +139,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
     import sys
     import pickle
     import cmdline_helpers
+    import json
 
     fix_layers = [lyr.strip() for lyr in fix_layers.split(',')]
 
@@ -471,13 +474,14 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                 y_sup = get_one_hot(y_sup, n_classes)
                 clf_loss = classification_criterion(sup_logits_out, y_sup)
             else:
+                classification_criterion = nn.CrossEntropyLoss()
                 if double_softmax:
                     clf_loss = classification_criterion(F.softmax(sup_logits_out), y_sup)
                 else:
                     clf_loss = classification_criterion(sup_logits_out, y_sup)
 
             aug_loss, conf_mask, cls_bal_loss = compute_aug_loss(student_unsup_prob_out, teacher_unsup_prob_out)
-            graph_loss = compute_graph_loss(student_unsup_embeddings, teacher_unsup_logits_out)
+            #graph_loss = compute_graph_loss(student_unsup_embeddings, teacher_unsup_logits_out)
 
             conf_mask_count = torch.sum(conf_mask)
 
@@ -485,8 +489,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             loss_expr = clf_loss + unsup_loss * unsup_weight
             if cls_bal_loss is not None:
                 loss_expr = loss_expr + cls_bal_loss * cls_balance * unsup_weight
-            if graph_loss_wt is not None:
-                loss_expr += graph_loss * graph_loss_wt
+            #if graph_loss_wt is not None:
+                #loss_expr += graph_loss * graph_loss_wt
 
             loss_expr.backward()
             if pretrained_student_optimizer is not None:
@@ -582,6 +586,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
 
         best_mask_rate = 0.0
+        best_mean_acc = 0.0
         best_teacher_model_state = {k: v.cpu().numpy() for k, v in teacher_net.state_dict().items()}
 
         train_batch_iter = train_ds.batch_iterator(batch_size=batch_size, shuffle=shuffle_rng)
@@ -593,6 +598,9 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                 test_batch_iter = target_test_ds.batch_iterator(batch_size=batch_size * 2)
             else:
                 test_batch_iter = None
+
+            if epoch > 10 and anneal:
+                confidence_thresh *= 0.95
 
             train_clf_loss, train_unsup_loss, mask_rate = data_source.batch_map_mean(
                 f_train, train_batch_iter, progress_iter_func=progress_bar, n_batches=n_train_batches)
@@ -626,6 +634,18 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                 # Save results
                 if arr_tgt_pred_history is not None:
                     arr_tgt_pred_history.append(tgt_pred_prob_y[None, ...].astype(np.float32))
+
+                # Save accs
+                if mean_class_acc > best_mean_acc:
+                    best_mean_acc = mean_class_acc
+                    dct = {'threshold': confidence_thresh,
+                           'activation': "True" if use_bce else "False",
+                           'other_in_source': "True" if use_other_source == -1 else "False",
+                           'mean_class_acc': mean_class_acc,
+                           'cls_acc_str': cls_acc_str}
+                    with open(dct_file, 'w') as f:
+                        json.dump(dct, f)
+                    
             else:
                 t2 = time.time()
                 log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}'.format(
