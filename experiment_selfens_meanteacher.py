@@ -17,7 +17,7 @@ import click
 @click.option('--unsup_weight', type=float, default=1.0, help='unsupervised loss weight')
 @click.option('--cls_balance', type=float, default=0.001, help='Weight of class balancing component of unsupervised '
                                                               'loss')
-@click.option('--cls_balance_loss', type=click.Choice(['bce', 'log', 'bug', '8x', 'uniform_known', '1/20+8/20']), default='bug',
+@click.option('--cls_balance_loss', type=click.Choice(['bce', 'log', 'bug', '8x', 'uniform_known', '1/20+8/20', 'bug_uniform_known', 'bug_8x']), default='bug',
               help='Class balancing loss function')
 @click.option('--learning_rate', type=float, default=1e-4, help='learning rate (Adam)')
 @click.option('--pretrained_lr_factor', type=float, default=0.1,
@@ -423,7 +423,11 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                 # Average over samples to get average class prediction
                 avg_cls_prob = torch.mean(stu_out, 0)
                 # Compute loss
-                if cls_balance_loss == 'uniform_known':
+                if cls_balance_loss == 'bug_uniform_known':
+                    equalise_cls_loss = cls_bal_fn(avg_cls_prob[:-1], float(1.0 / 12))
+                elif cls_balance_loss == 'bug_8x':
+                    equalise_cls_loss = cls_bal_fn(avg_cls_prob[:-1], float(1.0 / 20)) + cls_bal_fn(avg_cls_prob[-1:], float(8.0 / 20))
+                elif cls_balance_loss == 'uniform_known':
                     equalise_cls_loss = cls_bal_fn(avg_cls_prob, torch.FloatTensor([1/12 for _ in range(12)] + [0]).cuda())
                 elif cls_balance_loss == '1/20+8/20':
                     equalise_cls_loss = cls_bal_fn(avg_cls_prob, torch.FloatTensor([1/20 for _ in range(12)] + [8/20]).cuda())

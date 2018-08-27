@@ -286,7 +286,7 @@ def get_cls_bal_function(name):
         return robust_binary_crossentropy
     elif name == 'log':
         return log_cls_bal
-    elif name == 'bug':
+    elif name in ['bug', 'bug_8x', 'bug_uniform_known']:
         return bugged_cls_bal_bce
     elif name in ['uniform_known', '8x', '1/20+8/20']:
         return bce_vector_cls_bal
