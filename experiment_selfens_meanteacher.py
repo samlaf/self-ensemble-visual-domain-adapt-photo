@@ -101,7 +101,7 @@ import click
 @click.option('--graph_loss_wt', type=float, help='Weight to give to graph smoothing loss')
 @click.option('--use_bce', type=bool, default=False, help='Use element-wise sigmoid + BCE instead of softmax + CE')
 @click.option('--dct_file', type=str, default='', help='File to save json dct with accuracies in')
-@click.option('--anneal', type=bool, default=False, help='Anneal confidence_thresh (*0.95 every epoch)')
+@click.option('--curriculum', type=click.Choice(['a','b']), help='Anneal confidence_thresh (*0.95 every epoch) starting at epoch 10')
 
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
@@ -120,7 +120,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt, use_bce, dct_file, anneal):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt, use_bce, dct_file, curriculum):
     settings = locals().copy()
 
     if rnd_init:
@@ -211,8 +211,8 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_source)
             d_target = visda17_dataset.ValidationDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018, use_other=use_other_target)
         elif exp == 'visda_train_test':
-            d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True)
-            d_target = visda17_dataset.TestDataset(img_size=img_shape, range01=True, rgb_order=True)
+            d_source = visda17_dataset.TrainDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018)
+            d_target = visda17_dataset.TestDataset(img_size=img_shape, range01=True, rgb_order=True, visda2018=visda2018)
 
             if not skip_epoch_eval:
                 print('WARNING: setting skip_epoch_eval to True')
@@ -599,8 +599,10 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             else:
                 test_batch_iter = None
 
-            if epoch > 10 and anneal:
+            if epoch > 10 and curriculum:
                 confidence_thresh *= 0.95
+            if epoch > 10 and curriculum == 'b':
+                threshold_pred = 0.5
 
             train_clf_loss, train_unsup_loss, mask_rate = data_source.batch_map_mean(
                 f_train, train_batch_iter, progress_iter_func=progress_bar, n_batches=n_train_batches)

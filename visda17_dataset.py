@@ -148,8 +148,11 @@ class ValidationDataset (VISDA17Dataset):
 
 
 class TestDataset (VISDA17Dataset):
-    def __init__(self, img_size, range01=False, rgb_order=False, dummy=False):
-        test_dir = settings.get_data_dir('visda17_clf_test')
+    def __init__(self, img_size, range01=False, rgb_order=False, dummy=False, visda2018=False):
+        if visda2018:
+            test_dir = settings.get_data_dir('visda18_clf_test')
+        else:
+            test_dir = settings.get_data_dir('visda17_clf_test')
         file_list_path = os.path.join(test_dir, 'image_list.txt')
         super(TestDataset, self).__init__(img_size, range01, rgb_order,
                                           file_list_path, test_dir, has_ground_truth=False,
