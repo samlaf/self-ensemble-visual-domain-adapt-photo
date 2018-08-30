@@ -102,6 +102,7 @@ import click
 @click.option('--use_bce', type=bool, default=False, help='Use element-wise sigmoid + BCE instead of softmax + CE')
 @click.option('--dct_file', type=str, default='', help='File to save json dct with accuracies in')
 @click.option('--curriculum', type=click.Choice(['a','b']), help='Anneal confidence_thresh (*0.95 every epoch) starting at epoch 10')
+@click.option('--mask_cb', is_flag=True, default=False, help='Whether to mask class_balance or not')
 
 def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, unsup_weight,
                cls_balance, cls_balance_loss,
@@ -120,7 +121,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                log_file, skip_epoch_eval, result_file, record_history, model_file, hide_progress_bar,
                subsetsize, subsetseed,
                device, num_threads,
-               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt, use_bce, dct_file, curriculum):
+               use_other_source, use_other_target, visda2018, n_train_batches, use_other_mask, threshold_pred, graph_loss_wt, use_bce, dct_file, curriculum, mask_cb):
     settings = locals().copy()
 
     if rnd_init:
@@ -421,6 +422,12 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             # Class balance loss
             if cls_balance > 0.0:
                 # Average over samples to get average class prediction
+                if mask_cb:
+                    if use_other_mask:
+                        mask = conf_mask * unknown_mask
+                    else:
+                        mask = conf_mask
+                    stu_out = mask.view(-1,1) * stu_out
                 avg_cls_prob = torch.mean(stu_out, 0)
                 # Compute loss
                 if cls_balance_loss == 'bug_uniform_known':
@@ -519,19 +526,21 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             return (F.softmax(teacher_net(X_var)).data.cpu().numpy(),)
 
         def f_pred_tgt(X_sup):
-            X_var = torch.autograd.Variable(torch.from_numpy(X_sup).cuda())
-            teacher_net.train(mode=False)
-            return (F.softmax(teacher_net(X_var)).data.cpu().numpy(),)
+            with torch.no_grad():
+                X_var = torch.autograd.Variable(torch.from_numpy(X_sup).cuda())
+                teacher_net.train(mode=False)
+                return (F.softmax(teacher_net(X_var)).data.cpu().numpy(),)
 
         def f_pred_tgt_mult(X_sup):
-            teacher_net.train(mode=False)
-            y_pred_aug = []
-            for aug_i in range(len(X_sup)):
-                X_var = torch.autograd.Variable(torch.from_numpy(X_sup[aug_i, ...]).cuda())
-                y_pred = F.softmax(teacher_net(X_var)).data.cpu().numpy()
-                y_pred_aug.append(y_pred[None, ...])
-            y_pred_aug = np.concatenate(y_pred_aug, axis=0)
-            return (y_pred_aug.mean(axis=0),)
+            with torch.no_grad():
+                teacher_net.train(mode=False)
+                y_pred_aug = []
+                for aug_i in range(len(X_sup)):
+                    X_var = torch.autograd.Variable(torch.from_numpy(X_sup[aug_i, ...]).cuda())
+                    y_pred = F.softmax(teacher_net(X_var)).data.cpu().numpy()
+                    y_pred_aug.append(y_pred[None, ...])
+                y_pred_aug = np.concatenate(y_pred_aug, axis=0)
+                return (y_pred_aug.mean(axis=0),)
 
         print('Compiled evaluation function')
 
@@ -563,7 +572,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             n_samples = epoch_size
         if n_train_batches is None:
             n_train_batches = n_samples // batch_size
-        n_test_batches = n_tgt // (batch_size * 2) + 1
+            n_test_batches = n_tgt // (batch_size * 2) + 1
 
         print('Training...')
         sup_ds = data_source.ArrayDataSource([d_source.images, d_source.y], repeats=-1, indices=source_indices)
@@ -633,7 +642,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
 
                 log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}; '
                     'TGT mean class acc={:.3%}'.format(
-                    improve_str, epoch, t2 - t1, train_clf_loss, train_unsup_loss, mask_rate, mean_class_acc))
+                        improve_str, epoch, t2 - t1, train_clf_loss, train_unsup_loss, mask_rate, mean_class_acc))
                 log('  per class:  {}'.format(cls_acc_str))
                 log(str(conf_matrix))
 
@@ -651,7 +660,7 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
                            'cls_acc_str': cls_acc_str}
                     with open(dct_file, 'w') as f:
                         json.dump(dct, f)
-                    
+                        
             else:
                 t2 = time.time()
                 log('{}Epoch {} took {:.2f}s: TRAIN clf loss={:.6f}, unsup loss={:.6f}, mask={:.3%}'.format(
@@ -685,18 +694,18 @@ def experiment(exp, arch, rnd_init, img_size, confidence_thresh, teacher_alpha, 
             log(str(conf_matrix))
 
         # Predict on test set, using augmentation
-        tgt_aug_pred_prob_y, = target_mult_test_ds.batch_map_concat(f_pred_tgt_mult, batch_size=batch_size,
-                                                                    progress_iter_func=progress_bar)
-        if d_target.has_ground_truth:
-            aug_mean_class_acc, aug_cls_acc_str, conf_matrix = evaluator.evaluate(tgt_aug_pred_prob_y, t=threshold_pred)
+        # tgt_aug_pred_prob_y, = target_mult_test_ds.batch_map_concat(f_pred_tgt_mult, batch_size=batch_size,
+        #                                                             progress_iter_func=progress_bar)
+        # if d_target.has_ground_truth:
+        #     aug_mean_class_acc, aug_cls_acc_str, conf_matrix = evaluator.evaluate(tgt_aug_pred_prob_y, t=threshold_pred)
 
-            log('FINAL: TGT AUG mean class acc={:.3%}'.format(aug_mean_class_acc))
-            log('  per class:  {}'.format(aug_cls_acc_str))
-            log(str(conf_matrix))
+        #     log('FINAL: TGT AUG mean class acc={:.3%}'.format(aug_mean_class_acc))
+        #     log('  per class:  {}'.format(aug_cls_acc_str))
+        #     log(str(conf_matrix))
 
         if f_target_pred is not None:
             f_target_pred.create_array(g_tgt_pred, 'y_prob', tgt_pred_prob_y)
-            f_target_pred.create_array(g_tgt_pred, 'y_prob_aug', tgt_aug_pred_prob_y)
+#            f_target_pred.create_array(g_tgt_pred, 'y_prob_aug', tgt_aug_pred_prob_y)
             f_target_pred.close()
 
 if __name__ == '__main__':

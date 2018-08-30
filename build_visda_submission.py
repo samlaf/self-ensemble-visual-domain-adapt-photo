@@ -2,9 +2,9 @@ import click
 
 
 @click.command()
-@click.argument('output', type=click.File('wb'))
-@click.argument('source_pred_path', type=click.Path(exists=True))
 @click.argument('predictions_paths', type=click.Path(exists=True), nargs=-1)
+@click.option('--output', type=click.File('wb'))
+@click.option('--source_pred_path', type=click.Path(exists=True))
 @click.option('--no_aug', is_flag=True, default=False)
 @click.option('--epoch', type=int, default=None)
 def build_submission(output, source_pred_path, predictions_paths, no_aug, epoch):
@@ -44,12 +44,12 @@ def build_submission(output, source_pred_path, predictions_paths, no_aug, epoch)
 
 
             for i in range(len(pred_y_cls)):
-                dest_file.write('{}\n'.format(pred_y_cls[i]).encode('us-ascii'))
+                dest_file.write('{}\n'.format(pred_y_cls[i]))
 
-    z = zipfile.ZipFile(output, mode='w')
-    write_predictions(z.open('source_results.txt', 'w'), [source_pred_path])
-    write_predictions(z.open('adaptation_results.txt', 'w'), predictions_paths)
-    z.close()
+    #z = zipfile.ZipFile(output, mode='w')
+    #write_predictions(z.open('source_results.txt', 'w'), [source_pred_path])
+    write_predictions(open('adaptation_results.txt', 'w'), predictions_paths)
+    #z.close()
 
 
 if __name__ == '__main__':
